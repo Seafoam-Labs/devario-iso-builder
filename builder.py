@@ -303,7 +303,7 @@ def assemble(root, profile, media, work, output, manifest):
         if not temporary.stat().st_size:
             fail("empty ISO")
         metadata = command("xorriso", "-no_rc", "-indev", temporary, "-pvd_info", capture=True).stdout
-        if "prepared by devario-iso-builder" not in metadata:
+        if "prepared by devario-iso-builder" not in metadata.lower():
             fail("ISO preparer metadata verification failed")
         return temporary, target
     except BaseException:
