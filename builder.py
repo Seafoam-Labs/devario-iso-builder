@@ -272,8 +272,12 @@ def assemble(root, profile, media, work, output, manifest):
     write(in_root(root, "etc/machine-id"), "uninitialized\n")
     image = media / "devario/x86_64/airootfs.sfs"
     image.parent.mkdir(parents=True, exist_ok=True)
+    squash_environment = dict(os.environ)
+    # mksquashfs rejects combining SOURCE_DATE_EPOCH with explicit timestamps.
+    squash_environment.pop("SOURCE_DATE_EPOCH", None)
     command("mksquashfs", root, image, "-noappend", "-comp", "xz", "-Xbcj", "x86",
-            "-b", "1M", "-mkfs-time", manifest["epoch"], "-all-time", manifest["epoch"])
+            "-b", "1M", "-mkfs-time", manifest["epoch"], "-all-time", manifest["epoch"],
+            env=squash_environment)
     with image.open("rb") as stream:
         sha512 = hashlib.file_digest(stream, "sha512").hexdigest()
     write(image.with_suffix(".sha512"), sha512 + "  airootfs.sfs\n")
