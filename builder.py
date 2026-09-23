@@ -281,7 +281,7 @@ def assemble(root, profile, media, work, output, manifest):
     if signing:
         command("openssl", "cms", "-sign", "-binary", "-noattr", "-in", image,
                 "-signer", signing["certificate"], "-inkey", signing["key"],
-                "-outform", "DER", "-out", str(image) + ".cms")
+                "-outform", "DER", "-out", str(image) + ".cms.sig")
     name = f'{manifest["name"]}-{manifest["version"]}-x86_64.iso'
     temporary = output / ("." + name + ".partial")
     target = output / name
