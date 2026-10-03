@@ -28,11 +28,34 @@ must supply Syslinux, systemd-boot, Devario kernel metadata and dracut integrati
 Run in a private mount namespace/container. Work directories must be fresh.
 Failed builds preserve their work tree for diagnosis and remove partial ISOs.
 
+Shelly's native RLPM CLI reads `/etc/pacman.conf`. The builder starts a private
+mount namespace and bind-mounts the generated transaction configuration there,
+read-only, for synchronization, installation, and inventory. The host must have
+a regular file at that location as a mountpoint; its contents are not changed.
+`RootDir`, database, cache, log, keyring, and hook paths select the target tree.
+Default host hook directories are masked while target hooks remain enabled.
+No configuration alias or `SHELLY_ALPM_CONFIG` environment override is used.
+Supply the executable from the `shelly-cli` package, not the UI package.
+
+This assembler does not supply an operating-system bootstrap filesystem.
+Running it on a provisioned native build host requires no bootstrap archive.
+A caller using a fresh systemd-nspawn container must provision that container
+separately before invoking the assembler.
+
 The ISO is accompanied by SHA-256 and JSON inventory/provenance reports. Private
 keys never enter the target filesystem. Source archives are pinned by the
 consumer, with corresponding source retained through its release procedure.
 
 Run `python3 -m unittest discover -s tests` for unprivileged contract tests.
+Test an actual Shelly CLI against a disposable local repository and target:
+
+```sh
+unshare --user --map-root-user --mount --propagation private \
+  python3 tests/rlpm_transaction_smoke.py /path/to/shelly
+```
+
+This needs `repo-add`, `zstd`, and user namespaces. It checks synchronization,
+installation, target inventory, and preservation of the host configuration.
 Full acceptance additionally requires a signed package closure, BIOS/UEFI live
 boots and installation, copy-to-RAM, network/loopback, and installed update tests.
 
