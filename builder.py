@@ -14,7 +14,7 @@ import signal
 import subprocess
 import sys
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 FIELDS = {"schemaVersion", "architecture", "profile", "work", "output", "epoch",
           "name", "version", "label", "publisher", "application", "shelly",
           "shellyConfig", "keyring", "kernelId", "permissions", "signing"}
@@ -124,9 +124,7 @@ def render(text, manifest):
 
 
 def inventory(shelly, config, requested):
-    # The caller mounts config at RLPM's configuration path for the complete
-    # transaction, including this inventory query.
-    result = command(shelly, "list", "standard", "--show-hidden", "--json", capture=True)
+    result = command(shelly, "--config", config, "list", "standard", "--show-hidden", "--json", capture=True)
     data = json.loads(result.stdout)
     if isinstance(data, dict):
         data = [data]
@@ -139,39 +137,6 @@ def inventory(shelly, config, requested):
     if missing:
         fail("Shelly did not install requested package(s): " + ", ".join(missing))
     return installed
-
-
-@contextlib.contextmanager
-def shelly_configuration(config, work):
-    """Mount RLPM's transaction config privately, without changing host bytes."""
-    target = Path("/etc/pacman.conf")
-    if not target.is_file() or target.is_symlink():
-        fail("builder requires a regular /etc/pacman.conf as the RLPM config mountpoint")
-    empty_hooks = work / "host-hooks-masked"
-    empty_hooks.mkdir()
-    mounted = []
-    command("mount", "--bind", config, target)
-    mounted.append(target)
-    try:
-        command("mount", "-o", "remount,bind,ro", target)
-        # RLPM's configuration parser appends HookDir entries to its defaults.
-        # Hide host defaults; the generated config still names target hooks.
-        for directory in ("/usr/share/libalpm/hooks", "/etc/pacman.d/hooks"):
-            host_hooks = Path(directory)
-            if host_hooks.is_dir():
-                command("mount", "--bind", empty_hooks, host_hooks)
-                mounted.append(host_hooks)
-                command("mount", "-o", "remount,bind,ro", host_hooks)
-        yield
-    finally:
-        errors = []
-        for path in reversed(mounted):
-            try:
-                command("umount", path)
-            except subprocess.CalledProcessError:
-                errors.append(str(path))
-        if errors:
-            fail("could not unmount private RLPM configuration: " + ", ".join(errors))
 
 
 @contextlib.contextmanager
@@ -215,15 +180,15 @@ def isolated_config(source, root, keyring, destination):
     lines = []
     options = 0
     for line in Path(source).read_text().splitlines():
-        if re.match(r"\s*(RootDir|DBPath|CacheDir|HookDir|LogFile|GPGDir)\s*=", line, re.I):
+        if re.match(r"\s*(RootDir|DBPath|CacheDir|HookDir|HookDirMode|LogFile|GPGDir)\s*=", line, re.I):
             continue
         lines.append(line)
         if line.strip().lower() == "[options]":
             options += 1
-            lines.extend([f"RootDir = {root}", f"DBPath = {root}/var/lib/pacman",
-                          f"CacheDir = {root}/var/cache/pacman/pkg", f"GPGDir = {keyring}",
-                          f"LogFile = {root}/var/log/pacman.log",
-                          f"HookDir = {root}/etc/pacman.d/hooks", f"HookDir = {root}/usr/share/libalpm/hooks"])
+            lines.extend([f"RootDir = {root}", f"DBPath = {root}/var/lib/shelly",
+                          f"CacheDir = {root}/var/cache/shelly/pkg", f"GPGDir = {keyring}",
+                          f"LogFile = {root}/var/log/shelly.log",
+                          "HookDirMode = Replace", f"HookDir = {root}/usr/share/rlpm/hooks", f"HookDir = {root}/etc/shelly.d/hooks"])
     if options != 1:
         fail("Shelly configuration must have exactly one options section")
     write(destination, "\n".join(lines) + "\n")
@@ -295,7 +260,7 @@ def assemble(root, profile, media, work, output, manifest):
     command("mkfs.fat", "--invariant", "-F", "32", "-n", "DEVARIO_EFI", esp_image)
     command("mcopy", "-s", "-i", esp_image, *sorted(esp.iterdir()), "::/")
     # Boot assets must be staged before removing /boot from the installation root.
-    for name in ("boot", "var/cache/pacman/pkg", "var/lib/pacman/sync", "var/log", "var/tmp", "tmp"):
+    for name in ("boot", "var/cache/shelly/pkg", "var/lib/shelly/sync", "var/log", "var/tmp", "tmp"):
         path = in_root(root, name)
         if path.exists():
             for item in path.iterdir():
@@ -367,13 +332,13 @@ def build(manifest, manifest_path):
     if not requested or any(not re.fullmatch(r"[A-Za-z0-9@._+][A-Za-z0-9@._+-]*", n) for n in requested):
         fail("invalid package list")
     overlay(profile / "airootfs", root)
-    for name in ("var/lib/pacman", "var/cache/pacman/pkg", "var/log", "etc/pacman.d/hooks", "boot"):
+    for name in ("var/lib/shelly", "var/cache/shelly/pkg", "var/log", "etc/shelly.d/hooks", "boot"):
         in_root(root, name).mkdir(parents=True, exist_ok=True)
     config = work / "shelly.conf"
     isolated_config(manifest["shellyConfig"], root, manifest["keyring"], config)
-    with shelly_configuration(config, work), mounted_root(root):
-        command(manifest["shelly"], "sync", "standard", "--no-confirm")
-        command(manifest["shelly"], "install", "standard", "--no-confirm", *requested)
+    with mounted_root(root):
+        command(manifest["shelly"], "--config", config, "sync", "standard", "--no-confirm")
+        command(manifest["shelly"], "--config", config, "install", "standard", "--no-confirm", *requested)
         installed = inventory(manifest["shelly"], config, requested)
     if re.search(r"^liveuser:", in_root(root, "etc/passwd").read_text(), re.M) or in_root(root, "home/liveuser").exists():
         fail("live account was materialized before the late overlay")

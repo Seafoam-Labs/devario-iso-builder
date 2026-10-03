@@ -86,21 +86,25 @@ class ContractTests(unittest.TestCase):
         b.isolated_config(source, self.root / "target", self.root / "keys", result)
         text = result.read_text()
         self.assertNotIn("/host-db", text)
-        self.assertIn(f"DBPath = {self.root}/target/var/lib/pacman", text)
+        self.assertIn(f"DBPath = {self.root}/target/var/lib/shelly", text)
         self.assertIn("Server = file:///repo", text)
 
-    def test_rlpm_configuration_is_private_and_cleaned_up(self):
-        config = self.root / "transaction.conf"
-        config.write_text("[options]\nRootDir = /target\nDBPath = /target/var/lib/pacman\n")
-        with patch.object(b, "command") as invoke, patch.object(Path, "is_file", return_value=True), patch.object(Path, "is_symlink", return_value=False), patch.object(Path, "is_dir", return_value=True):
-            with self.assertRaisesRegex(RuntimeError, "install failed"):
-                with b.shelly_configuration(config, self.root):
-                    raise RuntimeError("install failed")
-        self.assertEqual(invoke.call_args_list[-1].args, ("umount", Path("/etc/pacman.conf")))
-        self.assertEqual(invoke.call_args_list[0].args, ("mount", "--bind", config, Path("/etc/pacman.conf")))
-        self.assertEqual(invoke.call_args_list[1].args, ("mount", "-o", "remount,bind,ro", Path("/etc/pacman.conf")))
-        unmounted = [call.args[-1] for call in invoke.call_args_list if call.args[0] == "umount"]
-        self.assertEqual(unmounted, [Path("/etc/pacman.d/hooks"), Path("/usr/share/libalpm/hooks"), Path("/etc/pacman.conf")])
+    def test_inventory_uses_explicit_configuration(self):
+        response = subprocess.CompletedProcess([], 0, '[{"Name":"bash","Version":"1"}]')
+        with patch.object(b, "command", return_value=response) as invoke:
+            b.inventory("shelly", "/build/transaction.conf", ["bash"])
+        self.assertEqual(invoke.call_args.args[:4], ("shelly", "--config", "/build/transaction.conf", "list"))
+
+    def test_isolated_hooks_replace_defaults_in_override_order(self):
+        source = self.root / "source.conf"
+        source.write_text("[options]\nHookDirMode = Append\nHookDir = /host/hooks\n")
+        output = self.root / "transaction.conf"
+        b.isolated_config(source, self.root / "target", self.root / "keys", output)
+        text = output.read_text()
+        self.assertNotIn("/host/hooks", text)
+        self.assertNotIn("HookDirMode = Append", text)
+        self.assertEqual(text.count("HookDirMode = Replace"), 1)
+        self.assertLess(text.index("usr/share/rlpm/hooks"), text.index("etc/shelly.d/hooks"))
 
     def test_inventory_rejects_duplicate_records(self):
         response = subprocess.CompletedProcess([], 0,

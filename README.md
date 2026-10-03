@@ -28,13 +28,12 @@ must supply Syslinux, systemd-boot, Devario kernel metadata and dracut integrati
 Run in a private mount namespace/container. Work directories must be fresh.
 Failed builds preserve their work tree for diagnosis and remove partial ISOs.
 
-Shelly's native RLPM CLI reads `/etc/pacman.conf`. The builder starts a private
-mount namespace and bind-mounts the generated transaction configuration there,
-read-only, for synchronization, installation, and inventory. The host must have
-a regular file at that location as a mountpoint; its contents are not changed.
-`RootDir`, database, cache, log, keyring, and hook paths select the target tree.
-Default host hook directories are masked while target hooks remain enabled.
-No configuration alias or `SHELLY_ALPM_CONFIG` environment override is used.
+The builder passes its generated transaction file through Shelly's `--config`
+option for synchronization, installation, and inventory. Configuration, state,
+cache, and logs use Shelly paths. `HookDirMode = Replace` selects only target
+`/usr/share/rlpm/hooks` followed by `/etc/shelly.d/hooks`, so administrator masks
+retain precedence. No host configuration mountpoint or hook masking is needed.
+The private mount namespace remains necessary for target API filesystems.
 Supply the executable from the `shelly-cli` package, not the UI package.
 
 This assembler does not supply an operating-system bootstrap filesystem.
